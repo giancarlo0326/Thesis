@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cookie;
 
 class AdminAuthController extends Controller
 {
@@ -49,8 +50,22 @@ class AdminAuthController extends Controller
                 ]
             );
 
+            // Set the session name and path based on user type
+            $sessionName = 'session_' . str_replace(' ', '_', $staff->role);
+            $sessionPath = '/' . str_replace(' ', '-', $staff->role);
+            
+            // Configure session
+            config(['session.cookie' => $sessionName]);
+            config(['session.path' => $sessionPath]);
+
             // Log the user in
             Auth::login($user);
+            
+            // Store user type and ID in session
+            Session::put('user_type', $staff->role);
+            Session::put('user_id', $user->id);
+            
+            // Regenerate session
             $request->session()->regenerate();
 
             // Create token for API authentication
@@ -58,6 +73,19 @@ class AdminAuthController extends Controller
 
             // Store token in session
             session(['api_token' => $token]);
+
+            // Set the session cookie with the new name and path
+            Cookie::queue(
+                $sessionName,
+                Session::getId(),
+                config('session.lifetime'),
+                $sessionPath,
+                config('session.domain'),
+                config('session.secure'),
+                true,
+                false,
+                config('session.same_site')
+            );
 
             return response()->json([
                 'success' => true,
@@ -102,6 +130,23 @@ class AdminAuthController extends Controller
     public function logout(Request $request)
     {
         try {
+            // Get the current user's role
+            $user = Auth::user();
+            $staff = DB::table('staff_tb')
+                ->where('username', $user->name)
+                ->first();
+
+            if ($staff) {
+                // Get the session name and path for this user type
+                $sessionName = 'session_' . str_replace(' ', '_', $staff->role);
+                $sessionPath = '/' . str_replace(' ', '-', $staff->role);
+                
+                // Clear the specific session cookie
+                Cookie::queue(
+                    Cookie::forget($sessionName, $sessionPath)
+                );
+            }
+
             // Revoke all tokens
             if (Auth::check()) {
                 Auth::user()->tokens()->delete();
